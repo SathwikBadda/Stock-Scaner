@@ -1,0 +1,14 @@
+requests==2.31.0
+pandas==2.1.4
+numpy==1.24.3
+python-telegram-bot==20.7
+schedule==1.2.0
+python-dotenv==1.0.0
+beautifulsoup4==4.12.2
+lxml==4.9.3
+aiohttp==3.9.1
+urllib3==2.1.0
+certifi==2023.11.17
+fyers-apiv3==3.1.7
+nsetools==1.0.11
+yfinance==0.2.28
