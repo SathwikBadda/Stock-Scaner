@@ -150,3 +150,16 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error inserting scan session: {e}")
             return False
+    
+    def clear_all_signals(self) -> bool:
+        """Delete all signals from the database (overwrite mode)."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM signals')
+                conn.commit()
+            logger.info("All previous signals cleared from database.")
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing signals: {e}")
+            return False

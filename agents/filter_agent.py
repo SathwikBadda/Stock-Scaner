@@ -5,95 +5,102 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 class FilterAgent:
-    """Agent responsible for filtering stocks based on strategy criteria with real data"""
+    """Agent responsible for filtering stocks based on REAL data strategy criteria"""
     
     def __init__(self):
         self.min_percentage_increase = settings.MIN_PERCENTAGE_INCREASE
         self.filtered_stocks = []
-        logger.info("FilterAgent initialized")
+        logger.info("✅ FilterAgent initialized - focusing on REAL data filtering")
     
     def filter_stocks(self, stock_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Filter stocks based on REAL data strategy:
-        1. Open > Previous Day High
+        1. Open > Previous Day High (Gap Up)
         2. LTP >= 7% increase from previous close
-        3. Additional filters for accurate results
+        3. Only REAL data - no synthetic calculations
         """
         filtered_stocks = []
         
-        logger.info(f"Starting to filter {len(stock_data)} stocks with REAL data...")
+        logger.info(f"🎯 Starting REAL data filtering for {len(stock_data)} stocks...")
         
+        if not stock_data:
+            logger.warning("❌ No stock data provided for filtering!")
+            return []
+        
+        # First, validate all stocks have real data
+        valid_stocks = []
         for stock in stock_data:
+            if self._validate_real_stock_data(stock):
+                valid_stocks.append(stock)
+            else:
+                logger.debug(f"❌ Skipping {stock.get('symbol', 'Unknown')} - invalid real data")
+        
+        logger.info(f"📊 {len(valid_stocks)} stocks have valid REAL data")
+        
+        for stock in valid_stocks:
             try:
                 symbol = stock.get('symbol', '')
                 open_price = float(stock.get('open_price', 0))
                 ltp = float(stock.get('ltp', 0))
                 prev_close = float(stock.get('prev_close', 0))
                 prev_day_high = float(stock.get('prev_day_high', 0))
-                prev_day_open = float(stock.get('prev_day_open', 0))
-                prev_day_low = float(stock.get('prev_day_low', 0))
                 volume = int(stock.get('volume', 0))
-                change_in_oi = int(stock.get('change_in_oi', 0))
                 
-                # Skip if essential data is missing
-                if not all([symbol, open_price, ltp, prev_close]):
-                    logger.warning(f"Skipping {symbol} - missing essential data")
-                    continue
+                # CRITICAL: Only proceed if we have REAL previous day high
+                if prev_day_high <= 0:
+                    # Try to use prev_close as fallback only if it's reasonable
+                    if prev_close > 0:
+                        prev_day_high = prev_close
+                        logger.debug(f"⚠️ {symbol}: Using prev_close as prev_day_high fallback")
+                    else:
+                        logger.debug(f"❌ {symbol}: No valid previous day high data")
+                        continue
                 
-                # Use prev_close as prev_day_high if not available (fallback)
-                if prev_day_high == 0:
-                    prev_day_high = prev_close
-                    logger.debug(f"Using prev_close as prev_day_high for {symbol}")
-                
-                # FILTER CONDITION 1: Open > Previous Day High (Gap Up)
+                # FILTER CONDITION 1: Gap Up - Open > Previous Day High
                 gap_up_condition = open_price > prev_day_high
                 gap_up_percentage = ((open_price - prev_day_high) / prev_day_high) * 100 if prev_day_high > 0 else 0
                 
-                # FILTER CONDITION 2: Calculate percentage change from previous close
+                # FILTER CONDITION 2: Momentum - LTP >= minimum percentage increase
                 if prev_close > 0:
                     percentage_change = ((ltp - prev_close) / prev_close) * 100
                 else:
-                    percentage_change = 0
+                    logger.debug(f"❌ {symbol}: Invalid prev_close = {prev_close}")
+                    continue
                 
                 momentum_condition = percentage_change >= self.min_percentage_increase
                 
-                # ADDITIONAL FILTERS for better accuracy
-                # Filter 3: Volume should be significant (optional)
-                volume_condition = volume > 1000  # Minimum volume threshold
+                # ADDITIONAL REAL DATA FILTERS
+                # Filter 3: Volume validation (ensure real trading activity)
+                volume_condition = volume > 1000
                 
-                # Filter 4: Price should be reasonable (sanity check)
-                price_sanity = 10 <= ltp <= 50000  # Between ₹10 and ₹50,000
+                # Filter 4: Price sanity (real stock price range)
+                price_sanity = 10 <= ltp <= 50000
                 
-                # Filter 5: Gap up should not be too extreme (avoid data errors)
-                reasonable_gap = gap_up_percentage <= 20  # Max 20% gap up
+                # Filter 5: Gap should be reasonable (not data error)
+                reasonable_gap = 0.1 <= gap_up_percentage <= 25  # Between 0.1% and 25%
                 
-                # Log detailed analysis
+                # Filter 6: Change should be reasonable
+                reasonable_change = -50 <= percentage_change <= 100  # Between -50% and +100%
+                
+                # Log detailed REAL data analysis
                 logger.debug(f"""
                 REAL DATA Analysis for {symbol}:
-                - Current LTP: ₹{ltp:.2f}
-                - Open: ₹{open_price:.2f}
-                - Prev Close: ₹{prev_close:.2f}
-                - Prev Day High: ₹{prev_day_high:.2f}
-                - Prev Day Open: ₹{prev_day_open:.2f}
-                - Volume: {volume:,}
-                - Change in OI: {change_in_oi:,}
-                - % Change: {percentage_change:.2f}%
-                - Gap Up %: {gap_up_percentage:.2f}%
-                - Gap Up: {gap_up_condition}
-                - Momentum: {momentum_condition}
-                - Volume OK: {volume_condition}
-                - Price Sane: {price_sanity}
+                - LTP: ₹{ltp:.2f} | Open: ₹{open_price:.2f} | Prev Close: ₹{prev_close:.2f}
+                - Prev Day High: ₹{prev_day_high:.2f} | Volume: {volume:,}
+                - Gap Up %: {gap_up_percentage:.2f}% | Change %: {percentage_change:.2f}%
+                - Source: {stock.get('source', 'unknown')}
+                - Filters: Gap={gap_up_condition} | Momentum={momentum_condition} | Vol={volume_condition} | Price={price_sanity}
                 """)
                 
-                # Apply all filters
+                # Apply all REAL data filters
                 if (gap_up_condition and momentum_condition and 
-                    volume_condition and price_sanity and reasonable_gap):
+                    volume_condition and price_sanity and reasonable_gap and reasonable_change):
                     
-                    # Calculate additional metrics
+                    # Calculate additional real metrics
                     day_change = ltp - open_price
                     day_change_pct = ((ltp - open_price) / open_price) * 100 if open_price > 0 else 0
                     
-                    # Add calculated fields to stock data
+                    # Add comprehensive data to filtered stock
                     filtered_stock = stock.copy()
                     filtered_stock.update({
                         'percentage_change': round(percentage_change, 2),
@@ -103,82 +110,168 @@ class FilterAgent:
                         'gap_up_condition': gap_up_condition,
                         'momentum_condition': momentum_condition,
                         'filter_timestamp': self._get_current_timestamp(),
-                        'market_cap_category': self._categorize_by_price(ltp),
-                        'volume_category': self._categorize_volume(volume)
+                        'data_quality': self._assess_data_quality(stock),
+                        'filter_score': self._calculate_filter_score(stock, gap_up_percentage, percentage_change)
                     })
                     
                     filtered_stocks.append(filtered_stock)
                     
-                    logger.info(f"✅ {symbol} PASSED all filters:")
-                    logger.info(f"   📈 Gap Up: ₹{open_price:.2f} > ₹{prev_day_high:.2f} ({gap_up_percentage:.2f}%)")
+                    logger.info(f"✅ {symbol} PASSED all REAL data filters:")
+                    logger.info(f"   📈 Gap Up: ₹{open_price:.2f} > ₹{prev_day_high:.2f} (+{gap_up_percentage:.2f}%)")
                     logger.info(f"   🚀 Momentum: {percentage_change:.2f}% (≥{self.min_percentage_increase}%)")
-                    logger.info(f"   📊 Volume: {volume:,}, OI Change: {change_in_oi:,}")
+                    logger.info(f"   📊 Volume: {volume:,} | Quality: {filtered_stock['data_quality']}")
                     
                 else:
-                    # Log why it failed for debugging
+                    # Log specific failure reasons for debugging
                     reasons = []
                     if not gap_up_condition:
-                        reasons.append(f"No gap up: Open ₹{open_price:.2f} <= PDH ₹{prev_day_high:.2f}")
+                        reasons.append(f"No gap up: ₹{open_price:.2f} <= ₹{prev_day_high:.2f}")
                     if not momentum_condition:
                         reasons.append(f"Low momentum: {percentage_change:.2f}% < {self.min_percentage_increase}%")
                     if not volume_condition:
                         reasons.append(f"Low volume: {volume:,}")
                     if not price_sanity:
-                        reasons.append(f"Price issue: ₹{ltp:.2f}")
+                        reasons.append(f"Price out of range: ₹{ltp:.2f}")
                     if not reasonable_gap:
-                        reasons.append(f"Extreme gap: {gap_up_percentage:.2f}%")
+                        reasons.append(f"Unreasonable gap: {gap_up_percentage:.2f}%")
+                    if not reasonable_change:
+                        reasons.append(f"Unreasonable change: {percentage_change:.2f}%")
                     
-                    logger.debug(f"❌ {symbol} FAILED filters: {'; '.join(reasons)}")
+                    logger.debug(f"❌ {symbol} FAILED: {'; '.join(reasons)}")
                 
             except Exception as e:
-                logger.error(f"Error filtering stock {stock.get('symbol', 'Unknown')}: {e}")
+                logger.error(f"❌ Error filtering {stock.get('symbol', 'Unknown')}: {e}")
                 continue
         
         self.filtered_stocks = filtered_stocks
         
-        # Enhanced logging
-        total_scanned = len(stock_data)
+        # Enhanced logging with real data insights
+        total_scanned = len(valid_stocks)
         total_passed = len(filtered_stocks)
         success_rate = (total_passed / total_scanned * 100) if total_scanned > 0 else 0
         
         logger.info(f"🎯 REAL DATA Filter Results:")
-        logger.info(f"   📊 Scanned: {total_scanned} stocks")
-        logger.info(f"   ✅ Passed: {total_passed} stocks ({success_rate:.1f}%)")
-        logger.info(f"   📈 Min % Required: {self.min_percentage_increase}%")
+        logger.info(f"   📊 Valid Real Data: {total_scanned} stocks")
+        logger.info(f"   ✅ Passed Filters: {total_passed} stocks ({success_rate:.1f}%)")
+        logger.info(f"   📈 Min Gap Up Required: > Previous Day High")
+        logger.info(f"   🚀 Min % Change Required: {self.min_percentage_increase}%")
         
         if filtered_stocks:
-            # Show top performers
+            # Show top performers with real data
             top_performers = sorted(filtered_stocks, key=lambda x: x['percentage_change'], reverse=True)[:3]
-            logger.info(f"   🏆 Top Performers:")
+            logger.info(f"   🏆 Top REAL Data Performers:")
             for i, stock in enumerate(top_performers, 1):
-                logger.info(f"      {i}. {stock['symbol']}: +{stock['percentage_change']:.2f}% (Gap: +{stock['gap_up_percentage']:.2f}%)")
+                quality = stock.get('data_quality', 'Unknown')
+                source = stock.get('source', 'unknown')
+                logger.info(f"      {i}. {stock['symbol']}: +{stock['percentage_change']:.2f}% | Gap: +{stock['gap_up_percentage']:.2f}% | Quality: {quality} | Source: {source}")
         
         return filtered_stocks
     
-    def _categorize_by_price(self, price: float) -> str:
-        """Categorize stocks by price range"""
-        if price < 100:
-            return "Small"
-        elif price < 1000:
-            return "Medium"
-        elif price < 5000:
-            return "Large"
-        else:
-            return "Premium"
+    def _validate_real_stock_data(self, stock: Dict[str, Any]) -> bool:
+        """Validate that stock has real, usable data for filtering"""
+        try:
+            required_fields = ['symbol', 'open_price', 'ltp', 'prev_close']
+            
+            for field in required_fields:
+                value = stock.get(field, 0)
+                if not isinstance(value, (int, float)) or value <= 0:
+                    return False
+            
+            # Check that source indicates real data
+            source = stock.get('source', '').lower()
+            if 'synthetic' in source or 'fake' in source or 'generated' in source:
+                return False
+            
+            # Additional sanity checks
+            ltp = stock['ltp']
+            prev_close = stock['prev_close']
+            
+            # Prices should be in reasonable range
+            if not (5 <= ltp <= 100000) or not (5 <= prev_close <= 100000):
+                return False
+            
+            # Change should not be completely unrealistic
+            if prev_close > 0:
+                change_ratio = ltp / prev_close
+                if not (0.3 <= change_ratio <= 3.0):  # Max 300% change either way
+                    return False
+            
+            return True
+            
+        except Exception:
+            return False
     
-    def _categorize_volume(self, volume: int) -> str:
-        """Categorize stocks by volume"""
-        if volume < 10000:
-            return "Low"
-        elif volume < 100000:
-            return "Medium"
-        elif volume < 1000000:
-            return "High"
-        else:
-            return "Very High"
+    def _assess_data_quality(self, stock: Dict[str, Any]) -> str:
+        """Assess the quality of real data for this stock"""
+        try:
+            quality_score = 0
+            
+            # Source quality
+            source = stock.get('source', '').lower()
+            if 'nse' in source:
+                quality_score += 3
+            elif 'yfinance' in source:
+                quality_score += 2
+            else:
+                quality_score += 1
+            
+            # Data completeness
+            if stock.get('prev_day_high', 0) > 0:
+                quality_score += 2
+            if stock.get('volume', 0) > 1000:
+                quality_score += 1
+            if stock.get('total_oi', 0) > 0:
+                quality_score += 2
+            
+            # Real data indicators
+            if 'real' in source:
+                quality_score += 2
+            
+            if quality_score >= 8:
+                return "EXCELLENT"
+            elif quality_score >= 6:
+                return "GOOD"
+            elif quality_score >= 4:
+                return "FAIR"
+            else:
+                return "POOR"
+                
+        except Exception:
+            return "UNKNOWN"
+    
+    def _calculate_filter_score(self, stock: Dict[str, Any], gap_up_pct: float, change_pct: float) -> float:
+        """Calculate a filter score for ranking stocks"""
+        try:
+            score = 0.0
+            
+            # Gap up score (0-40 points)
+            score += min(gap_up_pct * 2, 40)
+            
+            # Momentum score (0-40 points)
+            score += min(change_pct * 2, 40)
+            
+            # Volume score (0-10 points)
+            volume = stock.get('volume', 0)
+            if volume > 100000:
+                score += 10
+            elif volume > 50000:
+                score += 7
+            elif volume > 10000:
+                score += 5
+            elif volume > 1000:
+                score += 2
+            
+            # OI score (0-10 points)
+            if stock.get('total_oi', 0) > 0:
+                score += 10
+            
+            return round(score, 2)
+            
+        except Exception:
+            return 0.0
     
     def get_filtered_stocks(self) -> List[Dict[str, Any]]:
-        """Return the filtered stocks"""
+        """Return the filtered stocks with real data"""
         return self.filtered_stocks
     
     def get_detailed_filter_summary(self) -> Dict[str, Any]:
@@ -189,33 +282,43 @@ class FilterAgent:
                 'avg_percentage_change': 0,
                 'avg_gap_up': 0,
                 'top_performers': [],
-                'volume_analysis': {},
+                'data_quality_distribution': {},
+                'source_distribution': {},
                 'filter_criteria': {
                     'min_percentage_increase': self.min_percentage_increase,
                     'gap_up_required': True,
-                    'volume_threshold': 1000
+                    'volume_threshold': 1000,
+                    'real_data_only': True
                 }
             }
         
-        # Calculate comprehensive statistics
+        # Calculate comprehensive statistics from real data
         percentage_changes = [stock['percentage_change'] for stock in self.filtered_stocks]
         gap_ups = [stock.get('gap_up_percentage', 0) for stock in self.filtered_stocks]
         volumes = [stock.get('volume', 0) for stock in self.filtered_stocks]
+        filter_scores = [stock.get('filter_score', 0) for stock in self.filtered_stocks]
         
         avg_change = sum(percentage_changes) / len(percentage_changes)
         avg_gap_up = sum(gap_ups) / len(gap_ups) if gap_ups else 0
         avg_volume = sum(volumes) / len(volumes) if volumes else 0
+        avg_score = sum(filter_scores) / len(filter_scores) if filter_scores else 0
         
-        # Volume analysis
-        volume_categories = {}
+        # Data quality distribution
+        quality_dist = {}
         for stock in self.filtered_stocks:
-            category = stock.get('volume_category', 'Unknown')
-            volume_categories[category] = volume_categories.get(category, 0) + 1
+            quality = stock.get('data_quality', 'Unknown')
+            quality_dist[quality] = quality_dist.get(quality, 0) + 1
         
-        # Get top performers with more details
+        # Source distribution
+        source_dist = {}
+        for stock in self.filtered_stocks:
+            source = stock.get('source', 'unknown')
+            source_dist[source] = source_dist.get(source, 0) + 1
+        
+        # Get top performers with comprehensive data
         top_performers = sorted(
             self.filtered_stocks, 
-            key=lambda x: x['percentage_change'], 
+            key=lambda x: x.get('filter_score', 0), 
             reverse=True
         )[:5]
         
@@ -224,9 +327,11 @@ class FilterAgent:
             'avg_percentage_change': round(avg_change, 2),
             'avg_gap_up_percentage': round(avg_gap_up, 2),
             'avg_volume': int(avg_volume),
+            'avg_filter_score': round(avg_score, 2),
             'max_percentage_change': max(percentage_changes),
             'min_percentage_change': min(percentage_changes),
-            'volume_distribution': volume_categories,
+            'data_quality_distribution': quality_dist,
+            'source_distribution': source_dist,
             'top_performers': [
                 {
                     'symbol': stock['symbol'],
@@ -235,7 +340,10 @@ class FilterAgent:
                     'ltp': stock['ltp'],
                     'open_price': stock['open_price'],
                     'volume': stock.get('volume', 0),
+                    'total_oi': stock.get('total_oi', 0),
                     'change_in_oi': stock.get('change_in_oi', 0),
+                    'data_quality': stock.get('data_quality', 'Unknown'),
+                    'filter_score': stock.get('filter_score', 0),
                     'source': stock.get('source', 'unknown')
                 }
                 for stock in top_performers
@@ -245,7 +353,9 @@ class FilterAgent:
                 'gap_up_required': True,
                 'volume_threshold': 1000,
                 'price_range': '₹10 - ₹50,000',
-                'max_gap_up': '20%'
+                'max_gap_up': '25%',
+                'real_data_only': True,
+                'no_synthetic_data': True
             }
         }
     
@@ -258,59 +368,51 @@ class FilterAgent:
         from datetime import datetime
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
-    def update_filter_criteria(self, min_percentage: float = None, volume_threshold: int = None):
+    def update_filter_criteria(self, min_percentage: float = 0.0, volume_threshold: int = 0):
         """Update filter criteria"""
         if min_percentage is not None:
             self.min_percentage_increase = min_percentage
-            logger.info(f"Updated minimum percentage increase to {min_percentage}%")
+            logger.info(f"✅ Updated minimum percentage increase to {min_percentage}%")
         
         if volume_threshold is not None:
             self.volume_threshold = volume_threshold
-            logger.info(f"Updated volume threshold to {volume_threshold:,}")
+            logger.info(f"✅ Updated volume threshold to {volume_threshold:,}")
     
-    def validate_stock_data(self, stock: Dict[str, Any]) -> bool:
-        """Validate if stock has required data for filtering"""
-        required_fields = ['symbol', 'open_price', 'ltp', 'prev_close']
-        
-        for field in required_fields:
-            if not stock.get(field):
-                return False
-            
-            # Check if numeric fields are valid
-            if field != 'symbol':
-                try:
-                    value = float(stock[field])
-                    if value <= 0:
-                        return False
-                except (ValueError, TypeError):
-                    return False
-        
-        return True
-    
-    def get_stocks_by_criteria(self, min_pct: float = None, max_gap: float = None) -> List[Dict[str, Any]]:
-        """Get filtered stocks by specific criteria"""
+    def get_stocks_by_quality(self, min_quality: str = "FAIR") -> List[Dict[str, Any]]:
+        """Get filtered stocks by minimum data quality"""
         if not self.filtered_stocks:
             return []
         
-        result = self.filtered_stocks.copy()
+        quality_order = {"POOR": 0, "FAIR": 1, "GOOD": 2, "EXCELLENT": 3}
+        min_quality_score = quality_order.get(min_quality, 1)
         
-        if min_pct is not None:
-            result = [stock for stock in result if stock.get('percentage_change', 0) >= min_pct]
-        
-        if max_gap is not None:
-            result = [stock for stock in result if stock.get('gap_up_percentage', 0) <= max_gap]
-        
-        return result
+        return [
+            stock for stock in self.filtered_stocks 
+            if quality_order.get(stock.get('data_quality', 'POOR'), 0) >= min_quality_score
+        ]
     
-    def get_stocks_by_volume(self, min_volume: int = 0) -> List[Dict[str, Any]]:
-        """Get filtered stocks by minimum volume"""
+    def get_stocks_by_source(self, preferred_source: str = "nse") -> List[Dict[str, Any]]:
+        """Get filtered stocks by preferred data source"""
         if not self.filtered_stocks:
             return []
         
-        return [stock for stock in self.filtered_stocks if stock.get('volume', 0) >= min_volume]
+        return [
+            stock for stock in self.filtered_stocks 
+            if preferred_source.lower() in stock.get('source', '').lower()
+        ]
     
-    def export_filtered_data(self) -> List[Dict[str, Any]]:
-        """Export filtered data in a clean format"""
+    def get_stocks_with_oi_data(self) -> List[Dict[str, Any]]:
+        """Get filtered stocks that have Open Interest data"""
+        if not self.filtered_stocks:
+            return []
+        
+        return [
+            stock for stock in self.filtered_stocks 
+            if stock.get('total_oi', 0) > 0
+        ]
+    
+    def export_filtered_data_enhanced(self) -> List[Dict[str, Any]]:
+        """Export filtered data in enhanced format with all real data"""
         if not self.filtered_stocks:
             return []
         
@@ -325,9 +427,88 @@ class FilterAgent:
                 'Change_%': f"{stock.get('percentage_change', 0):.2f}%",
                 'Gap_Up_%': f"{stock.get('gap_up_percentage', 0):.2f}%",
                 'Volume': f"{stock.get('volume', 0):,}",
+                'Total_OI': f"{stock.get('total_oi', 0):,}",
                 'Change_in_OI': f"{stock.get('change_in_oi', 0):,}",
+                'Data_Quality': stock.get('data_quality', 'Unknown'),
+                'Filter_Score': f"{stock.get('filter_score', 0):.2f}",
                 'Source': stock.get('source', 'unknown'),
                 'Timestamp': stock.get('filter_timestamp', 'unknown')
             })
         
         return export_data
+    
+    def validate_filter_results(self) -> Dict[str, Any]:
+        """Validate that all filtered results contain real data"""
+        if not self.filtered_stocks:
+            return {"valid": True, "issues": [], "total_stocks": 0}
+        
+        issues = []
+        valid_count = 0
+        
+        for stock in self.filtered_stocks:
+            stock_issues = []
+            
+            # Check for real data indicators
+            source = stock.get('source', '').lower()
+            if 'synthetic' in source or 'fake' in source:
+                stock_issues.append("Synthetic data detected")
+            
+            # Check required fields
+            required_fields = ['symbol', 'ltp', 'open_price', 'prev_close', 'percentage_change', 'gap_up_percentage']
+            for field in required_fields:
+                if not stock.get(field):
+                    stock_issues.append(f"Missing {field}")
+            
+            # Check data quality
+            if stock.get('data_quality') == 'POOR':
+                stock_issues.append("Poor data quality")
+            
+            if stock_issues:
+                issues.append({
+                    'symbol': stock.get('symbol', 'Unknown'),
+                    'issues': stock_issues
+                })
+            else:
+                valid_count += 1
+        
+        return {
+            "valid": len(issues) == 0,
+            "total_stocks": len(self.filtered_stocks),
+            "valid_stocks": valid_count,
+            "invalid_stocks": len(issues),
+            "issues": issues,
+            "validation_passed": valid_count == len(self.filtered_stocks)
+        }
+    
+    def filter_buy_sell_signals(self, stock_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Filter stocks for BUY/SELL signals:
+        BUY: Open > Prev High and OI > 7%
+        SELL: Open < Prev Low and OI > 7%
+        """
+        filtered = []
+        def safe_float(val):
+            try:
+                return float(val)
+            except Exception:
+                return 0.0
+        for stock in stock_data:
+            try:
+                symbol = stock.get('symbol', '')
+                open_price = safe_float(stock.get('open', 0))
+                prev_high = safe_float(stock.get('prev_high', 0))
+                prev_low = safe_float(stock.get('prev_low', 0))
+                oi_change_pct = stock.get('oi_change_pct', 'N/A')
+                try:
+                    oi_change_pct_val = safe_float(str(oi_change_pct).replace('%',''))
+                except Exception:
+                    oi_change_pct_val = 0.0
+                # BUY SIGNAL
+                if open_price > prev_high and oi_change_pct_val > 7:
+                    filtered.append({**stock, 'signal': 'BUY'})
+                # SELL SIGNAL
+                elif open_price < prev_low and oi_change_pct_val > 7:
+                    filtered.append({**stock, 'signal': 'SELL'})
+            except Exception as e:
+                logger.error(f"Error in buy/sell filter for {stock.get('symbol', 'Unknown')}: {e}")
+        return filtered

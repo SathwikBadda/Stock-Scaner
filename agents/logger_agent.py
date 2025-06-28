@@ -15,29 +15,26 @@ class LoggerAgent:
         logger.info("LoggerAgent initialized")
     
     def log_signals(self, filtered_stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Log filtered stock signals to the database"""
+        """Log filtered stock signals to the database, overwriting previous signals."""
         try:
+            # Overwrite: clear all previous signals first
+            self.db_manager.clear_all_signals()
             logged_count = 0
             failed_count = 0
-            
             for stock in filtered_stocks:
                 try:
-                    # Prepare signal data for database
                     signal_data = {
                         'symbol': stock.get('symbol', ''),
-                        'open_price': float(stock.get('open_price', 0)),
-                        'ltp': float(stock.get('ltp', 0)),
+                        'open_price': float(stock.get('open', 0)),
+                        'ltp': float(stock.get('close', 0)),
                         'prev_close': float(stock.get('prev_close', 0)),
-                        'prev_day_high': float(stock.get('prev_day_high', 0)),
-                        'percentage_change': float(stock.get('percentage_change', 0)),
+                        'prev_day_high': float(stock.get('prev_high', 0)),
+                        'percentage_change': float(stock.get('oi_change_pct', 0)),  # Store OI % as percentage_change for this use-case
                         'volume': int(stock.get('volume', 0)),
                         'market_cap': float(stock.get('market_cap', 0)),
                         'source': stock.get('source', 'unknown')
                     }
-                    
-                    # Validate data
                     if self._validate_signal_data(signal_data):
-                        # Insert into database
                         if self.db_manager.insert_signal(signal_data):
                             logged_count += 1
                             self.logged_signals.append(signal_data)
@@ -48,15 +45,11 @@ class LoggerAgent:
                     else:
                         failed_count += 1
                         logger.warning(f"Invalid signal data for {stock.get('symbol', 'Unknown')}")
-                        
                 except Exception as e:
                     failed_count += 1
                     logger.error(f"Error processing signal for {stock.get('symbol', 'Unknown')}: {e}")
-            
-            # Log summary
             total_signals = logged_count + failed_count
             success_rate = (logged_count / total_signals * 100) if total_signals > 0 else 0
-            
             summary = {
                 'total_processed': total_signals,
                 'successfully_logged': logged_count,
@@ -64,11 +57,8 @@ class LoggerAgent:
                 'success_rate': round(success_rate, 2),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            
             logger.info(f"Logging complete: {logged_count}/{total_signals} signals logged successfully ({success_rate:.1f}%)")
-            
             return summary
-            
         except Exception as e:
             logger.error(f"Error in log_signals: {e}")
             return {
